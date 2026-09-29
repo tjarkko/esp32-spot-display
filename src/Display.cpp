@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#if defined(TOUCH_ENABLED)
+#include <TouchDrvCST.hpp>
+#include <Wire.h>
+#endif
 
 namespace {
 TFT_eSPI tft;
@@ -56,6 +60,39 @@ struct Button {
 
 Button leftButton{leftButtonPin};
 Button rightButton{rightButtonPin};
+
+#if defined(TOUCH_ENABLED)
+constexpr uint8_t touchSdaPin = 18;
+constexpr uint8_t touchSclPin = 17;
+constexpr uint8_t touchInterruptPin = 16;
+constexpr uint8_t touchResetPin = 21;
+TouchDrvCSTXXX touch;
+bool touchReady = false;
+bool touchWasPressed = false;
+
+void beginTouch() {
+    touch.setPins(touchResetPin, touchInterruptPin);
+    touch.setTouchDrvModel(TouchDrv_CST8XX);
+    touchReady = touch.begin(Wire, CST816_SLAVE_ADDRESS, touchSdaPin, touchSclPin);
+    if (!touchReady) {
+        Serial.println("[Touch] Controller not detected; physical buttons remain available");
+        return;
+    }
+    Serial.printf("[Touch] %s detected\n", touch.getModelName());
+    touch.disableAutoSleep();
+    touch.setMaxCoordinates(320, 170);
+    touch.setMirrorXY(true, false);
+    touch.setSwapXY(true);
+}
+
+bool touchPressEdge() {
+    if (!touchReady) return false;
+    const bool pressed = touch.getTouchPoints().hasPoints();
+    const bool edge = pressed && !touchWasPressed;
+    touchWasPressed = pressed;
+    return edge;
+}
+#endif
 
 uint16_t priceColor(float price) {
     if (price < Config::cheapPrice) return green;
@@ -231,6 +268,9 @@ void Display::begin() {
     digitalWrite(backlightPin, LOW);
     pinMode(leftButtonPin, INPUT_PULLUP);
     pinMode(rightButtonPin, INPUT_PULLUP);
+#if defined(TOUCH_ENABLED)
+    beginTouch();
+#endif
 
     tft.init();
     tft.setRotation(Config::rotation);
@@ -242,16 +282,27 @@ void Display::begin() {
     ledcAttachPin(backlightPin, 0);
     ledcWrite(0, 0);
     tft.writecommand(0x28);
-    Serial.printf("[Display] Ready; framebuffer %s. Press either button to wake.\n",
-                  spriteReady ? "OK" : "FAILED");
+    Serial.printf("[Display] Ready; framebuffer %s. Press either button to wake%s.\n",
+                  spriteReady ? "OK" : "FAILED",
+#if defined(TOUCH_ENABLED)
+                  " or tap the screen"
+#else
+                  ""
+#endif
+    );
 }
 
 void Display::tick(const AppState& state, time_t now) {
     const uint32_t currentMillis = millis();
     const bool leftPressed = leftButton.pressed(currentMillis);
     const bool rightPressed = rightButton.pressed(currentMillis);
+#if defined(TOUCH_ENABLED)
+    const bool tapped = touchPressEdge();
+#else
+    constexpr bool tapped = false;
+#endif
 
-    if (leftPressed || rightPressed) {
+    if (leftPressed || rightPressed || tapped) {
         if (!screenAwake) {
             turnOn(currentMillis);
         } else if (leftPressed) {

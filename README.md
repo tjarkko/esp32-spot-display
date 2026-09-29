@@ -9,6 +9,12 @@ either physical button to wake it. The right button cycles through the current
 price/chart, upcoming quarters and today's statistics. The left button turns
 the screen off. It also turns off automatically after 30 seconds.
 
+Touch support is optional at build time. The default build has it disabled and
+does not include the touch-driver library. To build firmware for the capacitive
+touch version, select the `lilygo-t-display-s3-touch` PlatformIO environment;
+a screen tap wakes the display or advances to the next page. The physical
+buttons continue to work in either build.
+
 ## VS Code
 
 Open this directory in VS Code. Install the PlatformIO IDE extension and allow
@@ -18,8 +24,10 @@ The PlatformIO terminal provides `pio` without changing your system shell.
 
 ```sh
 pio run                    # Compile; no board needs to be connected
+pio run -e lilygo-t-display-s3-touch  # Compile with capacitive touch enabled
 pio device list            # Find the connected board
 pio run --target upload    # Flash over USB
+pio run -e lilygo-t-display-s3-touch --target upload # Flash touch-enabled build
 pio device monitor         # Monitor at 115200 baud; Ctrl+C exits
 ```
 
