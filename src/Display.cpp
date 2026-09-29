@@ -1,6 +1,7 @@
 #include "Display.h"
 
 #include "Config.h"
+#include "Localization.h"
 #include "TimeService.h"
 
 #include <Arduino.h>
@@ -100,9 +101,56 @@ uint16_t priceColor(float price) {
     return yellow;
 }
 
+void makeDisplayText(const char* input, char* output, size_t outputSize, int font) {
+    size_t out = 0;
+    for (size_t in = 0; input[in] && out + 1 < outputSize; ++in) {
+        const uint8_t first = static_cast<uint8_t>(input[in]);
+        if (first == 0xC3 && input[in + 1]) {
+            const uint8_t second = static_cast<uint8_t>(input[++in]);
+            char base = '?';
+            uint8_t cp437 = '?';
+            switch (second) {
+                case 0x84: base = 'A'; cp437 = 0x8E; break; // Ä
+                case 0x85: base = 'A'; cp437 = 0x8F; break; // Å
+                case 0x96: base = 'O'; cp437 = 0x99; break; // Ö
+                case 0xA4: base = 'a'; cp437 = 0x84; break; // ä
+                case 0xA5: base = 'a'; cp437 = 0x86; break; // å
+                case 0xB6: base = 'o'; cp437 = 0x94; break; // ö
+            }
+            output[out++] = static_cast<char>(font == 1 ? cp437 : base);
+        } else if ((first & 0xC0) == 0x80) {
+            continue;
+        } else {
+            output[out++] = input[in];
+        }
+    }
+    output[out] = '\0';
+}
+
+void drawTextOnBackground(const char* value, int x, int y, uint16_t color,
+                          uint16_t textBackground, int font) {
+    char rendered[160];
+    makeDisplayText(value, rendered, sizeof(rendered), font);
+    canvas.setAttribute(CP437_SWITCH, 1);
+    canvas.setAttribute(UTF8_SWITCH, 0);
+    canvas.setTextColor(color, textBackground);
+    canvas.drawString(rendered, x, y, font);
+    canvas.setAttribute(UTF8_SWITCH, 1);
+    canvas.setAttribute(CP437_SWITCH, 0);
+}
+
 void drawText(const char* value, int x, int y, uint16_t color = foreground, int font = 2) {
-    canvas.setTextColor(color, background);
-    canvas.drawString(value, x, y, font);
+    drawTextOnBackground(value, x, y, color, background, font);
+}
+
+void replaceDecimalSeparator(char* value) {
+    if (Config::uiLanguage != Config::UiLanguage::Finnish) return;
+    for (char* cursor = value; *cursor; ++cursor) {
+        if (*cursor == '.') {
+            *cursor = ',';
+            return;
+        }
+    }
 }
 
 void drawHeader(time_t now) {
@@ -110,16 +158,18 @@ void drawHeader(time_t now) {
     drawText("FI / SPOT", 10, 4, green);
     TimeService::format(now, stamp, sizeof(stamp), "%d.%m %H:%M %Z");
     canvas.setTextDatum(TR_DATUM);
-    drawText(TimeService::ready() ? stamp : "SYNCING CLOCK", 310, 4, muted, 1);
+    drawText(TimeService::ready() ? stamp : Ui::text(Ui::Text::SyncingClock), 310, 4, muted, 1);
     canvas.setTextDatum(TL_DATUM);
     canvas.drawFastHLine(10, 23, 300, panel);
 }
 
 void drawWaiting(const AppState& state) {
-    drawText(TimeService::ready() ? "Waiting for prices" : "Setting the clock", 12, 43, foreground, 4);
-    drawText(state.wifiConnected ? "Wi-Fi connected" : "Connecting to Wi-Fi...", 12, 86, muted);
-    drawText(state.message, 12, 113, yellow, 1);
-    drawText("Updates continue while screen is off", 12, 137, muted, 1);
+    drawText(TimeService::ready() ? Ui::text(Ui::Text::WaitingForPrices)
+                                  : Ui::text(Ui::Text::SettingClock), 12, 43, foreground, 4);
+    drawText(state.wifiConnected ? Ui::text(Ui::Text::WifiConnected)
+                                 : Ui::text(Ui::Text::ConnectingWifi), 12, 86, muted);
+    drawText(Ui::appMessage(state.message), 12, 113, yellow, 1);
+    drawText(Ui::text(Ui::Text::UpdatesContinue), 12, 137, muted, 1);
 }
 
 void drawOverview(const AppState& state, const PriceInterval& current) {
@@ -128,15 +178,18 @@ void drawOverview(const AppState& state, const PriceInterval& current) {
     char end[12];
 
     snprintf(text, sizeof(text), "%.2f", current.centsPerKWh);
+    replaceDecimalSeparator(text);
     drawText(text, 10, 29, priceColor(current.centsPerKWh), 6);
-    drawText("c/kWh", 206, 33, muted);
-    drawText("VAT incl.", 206, 52, muted, 1);
+    drawText(Ui::text(Ui::Text::PriceUnit), 206, 33, muted);
+    drawText(Ui::text(Ui::Text::VatIncluded), 206, 52, muted, 1);
 
     TimeService::format(current.start, start, sizeof(start));
     TimeService::format(current.start + intervalSeconds, end, sizeof(end));
     const char* level = current.centsPerKWh < Config::cheapPrice
-                            ? "CHEAP"
-                            : current.centsPerKWh >= Config::expensivePrice ? "EXPENSIVE" : "MODERATE";
+                            ? Ui::text(Ui::Text::Cheap)
+                            : current.centsPerKWh >= Config::expensivePrice
+                                  ? Ui::text(Ui::Text::Expensive)
+                                  : Ui::text(Ui::Text::Moderate);
     snprintf(text, sizeof(text), "%s-%s  %s", start, end, level);
     drawText(text, 10, 77, priceColor(current.centsPerKWh), 1);
 
@@ -160,28 +213,31 @@ void drawOverview(const AppState& state, const PriceInterval& current) {
         canvas.fillRect(10 + slot * 3, std::min(priceY, zeroY), 2,
                         std::max(1, abs(priceY - zeroY)), priceColor(price->centsPerKWh));
     }
-    drawText("NOW", 10, 134, muted, 1);
+    drawText(Ui::text(Ui::Text::Now), 10, 134, muted, 1);
     drawText("+12h", 144, 134, muted, 1);
     drawText("+24h", 277, 134, muted, 1);
-    snprintf(text, sizeof(text), "24h known %u/96  MIN %.1f MAX %.1f",
+    snprintf(text, sizeof(text), Ui::text(Ui::Text::ChartSummary),
              static_cast<unsigned>(stats.count), stats.min, stats.max);
+    replaceDecimalSeparator(text);
     drawText(text, 10, 145, foreground, 1);
 }
 
 void drawUpcoming(const AppState& state, const PriceInterval& current) {
     char text[48];
     char stamp[20];
-    drawText("NEXT QUARTERS", 10, 30, green, 1);
+    drawText(Ui::text(Ui::Text::UpcomingQuarters), 10, 30, green, 1);
     for (int index = 0; index < 5; ++index) {
         const time_t start = current.start + (index + 1) * intervalSeconds;
         const PriceInterval* price = currentPrice(state.prices, start);
         TimeService::format(start, stamp, sizeof(stamp), "%H:%M %Z");
         drawText(stamp, 10, 46 + index * 20, muted);
         if (price) {
-            snprintf(text, sizeof(text), "%7.2f c/kWh", price->centsPerKWh);
+            snprintf(text, sizeof(text), "%7.2f %s", price->centsPerKWh,
+                     Ui::text(Ui::Text::PriceUnit));
+            replaceDecimalSeparator(text);
             drawText(text, 154, 46 + index * 20, priceColor(price->centsPerKWh));
         } else {
-            drawText("Not published", 154, 46 + index * 20, muted);
+            drawText(Ui::text(Ui::Text::NotPublished), 154, 46 + index * 20, muted);
         }
     }
 }
@@ -192,44 +248,50 @@ void drawToday(const AppState& state, time_t now) {
     const time_t start = TimeService::midnight(now);
     const time_t end = TimeService::midnight(now, 1);
     const PriceStats stats = priceStats(state.prices, start, end);
-    snprintf(text, sizeof(text), "TODAY / %u of %u quarters",
+    snprintf(text, sizeof(text), Ui::text(Ui::Text::TodaySummary),
              static_cast<unsigned>(stats.count), static_cast<unsigned>((end - start) / intervalSeconds));
     drawText(text, 10, 32, green, 1);
     if (!stats.count) {
-        drawText("No prices available", 10, 64, yellow, 4);
+        drawText(Ui::text(Ui::Text::NoPricesAvailable), 10, 64, yellow, 4);
         return;
     }
     TimeService::format(stats.minAt, stamp, sizeof(stamp), "%H:%M %Z");
-    snprintf(text, sizeof(text), "MIN %7.2f   %s", stats.min, stamp);
+    snprintf(text, sizeof(text), "%s %7.2f   %s", Ui::text(Ui::Text::Minimum), stats.min, stamp);
+    replaceDecimalSeparator(text);
     drawText(text, 10, 50, green);
     TimeService::format(stats.maxAt, stamp, sizeof(stamp), "%H:%M %Z");
-    snprintf(text, sizeof(text), "MAX %7.2f   %s", stats.max, stamp);
+    snprintf(text, sizeof(text), "%s %7.2f   %s", Ui::text(Ui::Text::Maximum), stats.max, stamp);
+    replaceDecimalSeparator(text);
     drawText(text, 10, 74, red);
-    snprintf(text, sizeof(text), "AVG %7.2f c/kWh", stats.average);
+    snprintf(text, sizeof(text), "%s %7.2f %s", Ui::text(Ui::Text::Average), stats.average,
+             Ui::text(Ui::Text::PriceUnit));
+    replaceDecimalSeparator(text);
     drawText(text, 10, 98, foreground);
     snprintf(text, sizeof(text), "Wi-Fi %s  RSSI %d dBm",
-             state.wifiConnected ? "on" : "off", state.signalDbm);
+             state.wifiConnected ? Ui::text(Ui::Text::WifiOn) : Ui::text(Ui::Text::WifiOff),
+             state.signalDbm);
     drawText(text, 10, 124, muted, 1);
     TimeService::format(state.prices.fetchedAt, stamp, sizeof(stamp), "%d.%m %H:%M");
-    snprintf(text, sizeof(text), "Fetched %s / sahkotin.fi", stamp);
+    snprintf(text, sizeof(text), Ui::text(Ui::Text::Fetched), stamp);
     drawText(text, 10, 140, muted, 1);
 }
 
 void drawFooter(const AppState& state, time_t now) {
-    const char* status = !state.wifiConnected ? "OFFLINE"
-                         : state.fetching      ? "UPDATING"
-                         : state.prices.fetchedAt && now - state.prices.fetchedAt > 7200 ? "STALE"
-                         : strcmp(state.message, "Prices ready") == 0 ? "LIVE" : "RETRY";
+    const Ui::Text status = !state.wifiConnected ? Ui::Text::Offline
+                            : state.fetching      ? Ui::Text::Updating
+                            : state.prices.fetchedAt && now - state.prices.fetchedAt > 7200
+                                  ? Ui::Text::Stale
+                            : strcmp(state.message, "Prices ready") == 0 ? Ui::Text::Live
+                                                                          : Ui::Text::Retry;
     const uint32_t elapsed = millis() - lastInteraction;
     const uint32_t secondsLeft = elapsed < Config::screenTimeoutMs
                                      ? (Config::screenTimeoutMs - elapsed + 999) / 1000
                                      : 0;
     char text[80];
-    snprintf(text, sizeof(text), "%s | right: next  left: off  %lus",
-             status, static_cast<unsigned long>(secondsLeft));
+    snprintf(text, sizeof(text), "%s | %s  %lus", Ui::text(status),
+             Ui::text(Ui::Text::FooterControls), static_cast<unsigned long>(secondsLeft));
     canvas.fillRect(0, 157, 320, 13, panel);
-    canvas.setTextColor(muted, panel);
-    canvas.drawString(text, 10, 159, 1);
+    drawTextOnBackground(text, 10, 159, muted, panel, 1);
 }
 
 void draw(const AppState& state, time_t now) {
@@ -325,8 +387,14 @@ void Display::tick(const AppState& state, time_t now) {
         draw(state, now);
     } else {
         tft.fillScreen(TFT_BLACK);
+        char rendered[64];
+        makeDisplayText(Ui::text(Ui::Text::DisplayAllocationFailed), rendered, sizeof(rendered), 2);
+        tft.setAttribute(CP437_SWITCH, 1);
+        tft.setAttribute(UTF8_SWITCH, 0);
         tft.setTextColor(TFT_WHITE);
-        tft.drawString("Display allocation failed", 5, 50, 2);
+        tft.drawString(rendered, 5, 50, 2);
+        tft.setAttribute(UTF8_SWITCH, 1);
+        tft.setAttribute(CP437_SWITCH, 0);
     }
     ledcWrite(0, Config::brightness);
 }

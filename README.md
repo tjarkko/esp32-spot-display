@@ -50,7 +50,8 @@ and upcoming prices are also logged to Serial every 30 seconds.
 - `src/PriceService.cpp`: Sähkötin HTTPS request and JSON validation.
 - `src/TimeService.cpp`: NTP and Finnish EET/EEST timezone handling.
 - `src/Display.cpp`: 320x170 UI, graph, buttons and screen timeout.
-- `include/Config.h`: screen timeout, brightness and price thresholds.
+- `include/Config.h`: UI language, screen timeout, brightness and price thresholds.
+- `include/Localization.h`: Finnish and English UI strings.
 - `include/secrets.h`: local Wi-Fi credentials; excluded from Git.
 - `test/`: reserved for tests as application logic is introduced.
 
@@ -68,7 +69,10 @@ the previous valid table. Normal refreshes run hourly; after 14:00, missing
 tomorrow prices are checked every 30 minutes. Failures retry after five minutes.
 
 Cheap and expensive thresholds, display brightness and the 30-second timeout
-can be adjusted in `include/Config.h`.
+can be adjusted in `include/Config.h`. The screen defaults to Finnish; change
+`Config::uiLanguage` there to `Config::UiLanguage::English` and rebuild to use
+English. Finnish special characters use the display's extended small font;
+larger built-in fonts use readable ASCII spellings.
 
 Dependencies belong in `platformio.ini`; no globally installed Arduino libraries
 are needed. The ESP32 platform version is pinned for repeatable builds.

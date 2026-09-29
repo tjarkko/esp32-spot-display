@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 namespace Config {
+enum class UiLanguage : uint8_t { English, Finnish };
+// Select the on-screen language here, then rebuild/upload the firmware.
+constexpr UiLanguage uiLanguage = UiLanguage::Finnish;
 constexpr char timezone[] = "EET-2EEST,M3.5.0/3,M10.5.0/4";
 constexpr uint32_t screenTimeoutMs = 30000;
 constexpr uint8_t brightness = 100; // PWM duty, 0..255
