@@ -1,0 +1,9 @@
+# PlatformIO build output and generated editor files
+.pio/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+# Local secrets
+include/secrets.h
+.env
+.env.*
